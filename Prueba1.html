@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reproductor IPTV con Grabación</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        body {
+            text-align: center;
+            background-color: black;
+            color: lime;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+        video {
+            width: 400px;
+            height: auto;
+            border: 2px solid lime;
+        }
+        .matrix {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            overflow: hidden;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body>
+    <div class="matrix"></div>
+    <h2>Reproductor IPTV con Grabación</h2>
+    <video id="videoPlayer" controls></video>
+    <br>
+    <input type="text" id="urlM3U" placeholder="Introduce la URL del stream">
+    <button onclick="cargarStream()">Cargar</button>
+    <button onclick="iniciarGrabacion()">Grabar</button>
+    <button onclick="detenerGrabacion()">Detener y Descargar</button>
+    <button onclick="activarPIP()">PIP</button>
+
+    <script>
+        let mediaRecorder;
+        let recordedChunks = [];
+
+        function cargarStream() {
+            const video = document.getElementById("videoPlayer");
+            const url = document.getElementById("urlM3U").value;
+            
+            if (url.endsWith(".m3u8")) {
+                if (Hls.isSupported()) {
+                    const hls = new Hls();
+                    hls.loadSource(url);
+                    hls.attachMedia(video);
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = url;
+                } else {
+                    alert("Tu navegador no soporta M3U8");
+                }
+            } else {
+                video.src = url;
+            }
+            video.play();
+        }
+
+        async function iniciarGrabacion() {
+            const video = document.getElementById("videoPlayer");
+            try {
+                const stream = video.captureStream();
+                mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm; codecs=vp9" });
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.start();
+                alert("Grabación iniciada.");
+            } catch (error) {
+                console.error("Error al iniciar grabación:", error);
+                alert("Tu navegador no soporta la grabación de video.");
+            }
+        }
+
+        function detenerGrabacion() {
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+                
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(recordedChunks, { type: "video/webm" });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const a = document.createElement("a");
+                    a.style.display = "none";
+                    a.href = url;
+                    a.download = "grabacion.webm";
+                    
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        recordedChunks = [];
+                    }, 100);
+                    
+                    alert("Grabación detenida y guardada.");
+                };
+            } else {
+                alert("No hay ninguna grabación en curso.");
+            }
+        }
+
+        function activarPIP() {
+            const video = document.getElementById("videoPlayer");
+            if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
+                if (video !== document.pictureInPictureElement) {
+                    video.requestPictureInPicture();
+                } else {
+                    document.exitPictureInPicture();
+                }
+            } else {
+                alert("Tu navegador no soporta Picture-in-Picture.");
+            }
+        }
+
+        function createMatrixEffect() {
+            const canvas = document.createElement("canvas");
+            document.querySelector(".matrix").appendChild(canvas);
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            const ctx = canvas.getContext("2d");
+            const symbols = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZあいうえおカキクケコ".split("");
+            const columns = Math.floor(canvas.width / 20);
+            const drops = Array(columns).fill(0);
+
+            function draw() {
+                ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "lime";
+                ctx.font = "18px monospace";
+                for (let i = 0; i < drops.length; i++) {
+                    const text = symbols[Math.floor(Math.random() * symbols.length)];
+                    ctx.fillText(text, i * 20, drops[i] * 20);
+                    if (drops[i] * 20 > canvas.height && Math.random() > 0.975) {
+                        drops[i] = 0;
+                    }
+                    drops[i]++;
+                }
+            }
+            setInterval(draw, 50);
+        }
+
+        createMatrixEffect();
+
+        // NUEVO: Cargar automáticamente si hay un parámetro ?stream=&pip=&fullscreen=
+        window.onload = async function () {
+            const params = new URLSearchParams(window.location.search);
+            const streamUrl = params.get("stream");
+            const autoPIP = params.get("pip") === "true";
+            const autoFull = params.get("fullscreen") === "true";
+
+            if (streamUrl) {
+                document.getElementById("urlM3U").value = streamUrl;
+                cargarStream();
+
+                // Espera a que el video esté listo antes de activar modos especiales
+                const video = document.getElementById("videoPlayer");
+                video.addEventListener("loadedmetadata", async () => {
+                    try {
+                        if (autoFull && video.requestFullscreen) {
+                            await video.requestFullscreen();
+                        }
+                        if (autoPIP && document.pictureInPictureEnabled) {
+                            await video.requestPictureInPicture();
+                        }
+                    } catch (e) {
+                        console.warn("Error al activar PIP o Fullscreen:", e);
+                    }
+                });
+            }
+        };
+    </script>
+</body>
+</html>
